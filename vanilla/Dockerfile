@@ -1,10 +1,6 @@
 FROM alpine:3.15.0 AS base
 
-RUN apk add --update-cache \
-    unzip
-
-# add the bootstrap file
-COPY bootstrap.sh /terraria-server/bootstrap.sh
+RUN apk add --update-cache unzip
 
 ENV DL_LINK=https://terraria.org/api/download/pc-dedicated-server/terraria-server-1445.zip
 ENV DL_VERSION=1445
@@ -12,32 +8,42 @@ ENV DL_FILE=terraria-server-1445.zip
 
 ADD $DL_LINK /$DL_FILE
 
+# Download and unpack
+ADD $DL_LINK /$DL_FILE
 RUN unzip /$DL_FILE -d /terraria && \
-    mv /terraria/$DL_VERSION/Linux/* /terraria-server && \
-    #Linux subfolder does not include any config text file, oddly.
-    mv /terraria/$DL_VERSION/Windows/serverconfig.txt /terraria-server/serverconfig-default.txt && \
-    chmod +x /terraria-server/TerrariaServer && \
-    chmod +x /terraria-server/TerrariaServer.bin.x86_64
+  mkdir /terraria-server && \
+  mv /terraria/$DL_VERSION/Linux/* /terraria-server && \
+  chmod +x /terraria-server/TerrariaServer.exe && \
+  chmod +x /terraria-server/TerrariaServer.bin.x86_64
 
 FROM mono:6.10.0.104-slim
-LABEL maintainer="Ryan Sheehan <rsheehan@gmail.com>"
 
 # documenting ports
 EXPOSE 7777
 
-# env used in the bootstrap
-ENV LOGPATH=/terraria-server/logs
-ENV WORLDPATH=/root/.local/share/Terraria/Worlds
-ENV WORLD_FILENAME=""
-ENV CONFIGPATH=/config
-ENV CONFIG_FILENAME="serverconfig.txt"
+COPY --from=base /terraria-server /terraria-server
+COPY bootstrap.sh /terraria-server
 
-VOLUME [ "${WORLDPATH}", "${CONFIGPATH}", "${LOGPATH}" ]
+RUN groupadd terraria -g 1000 && \
+  useradd terraria -m -u 1000 -g 1000 && \
+  apt-get update -y && \
+  apt-get install -y pcregrep && \
+  rm -rf /var/lib/apt/lists* /tmp* && \
+  mkdir /terraria-server/tmp && \
+  chown terraria:terraria /terraria-server/tmp
 
-COPY --from=base /terraria-server/ /terraria-server/
+WORKDIR /home/terraria/server
 
-# Set working directory to server
-WORKDIR /terraria-server
+RUN chown -R terraria:terraria .
 
-ENTRYPOINT [ "/bin/sh", "bootstrap.sh" ]
+USER terraria
 
+VOLUME [ "/home/terraria/server/worlds"  ]
+VOLUME [ "/home/terraria/server/logs"    ]
+VOLUME [ "/home/terraria/server/config"  ]
+
+RUN mkdir worlds && \
+  mkdir logs && \
+  mkdir config
+
+ENTRYPOINT [ "/bin/sh", "/terraria-server/bootstrap.sh" ]
